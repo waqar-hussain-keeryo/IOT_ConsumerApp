@@ -1,0 +1,8 @@
+﻿################################################################################
+# This .gitignore file was automatically created by Microsoft(R) Visual Studio.
+################################################################################
+
+/IOT_ConsumerApp/.vs
+/.vs
+/IOT_ConsumerApp/IOT_ConsumerApp/bin/Debug/net8.0
+/IOT_ConsumerApp/IOT_ConsumerApp/obj
