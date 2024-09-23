@@ -6,19 +6,19 @@ using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using System.Collections.Concurrent;
 using System.Globalization;
-using System.Threading.Tasks;
 
 public class Program
 {
     private static readonly string RabbitMQHost = "localhost";
     private static readonly string RabbitMQQueue = "IOTDeviceDataQueue";
-    private static readonly string InfluxDBUrl = "http://localhost:8086";
-    private static readonly string InfluxDBToken = "3jaB3TSuGswRsp-t7uP5C_18_1xf60SdcVkGAr-gHxkjCieY8360LfIRSq4hk_HM8enVTbT4j_GdSgDolMwCzw=="; // Use environment variable for tokens
-    private static readonly string InfluxDBOrg = "Diya";
-    private static readonly string InfluxDBBucket = "IOTDB";
+
+    private static readonly string InfluxDBUrl = "http://devinflux.centralus.cloudapp.azure.com:8086";
+    private static readonly string InfluxDBToken = "3jaB3TSuGswRsp-t7uP5C_18_1xf60SdcVkGAr-gHxkjCieY8360LfIRSq4hk_HM8enVTbT4j_GdSgDolMwCzw==";
+    private static readonly string InfluxDBOrg = "Aura";
+    private static readonly string InfluxDBBucket = "compdatatest";
 
     private static ConcurrentQueue<PointData> pointsQueue = new ConcurrentQueue<PointData>();
-    private static int batchSize = 100; // Set your desired batch size
+    private static int batchSize = 100;
     private static bool isProcessing = false;
 
     public static void Main(string[] args)
@@ -61,13 +61,13 @@ public class Program
             if (!DateTime.TryParseExact(scheduledDate, "MM-dd-yyyy/HH:mm:tt", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime timestamp))
             {
                 Console.WriteLine($"Invalid scheduled date: {scheduledDate}");
-                continue; // Skip this data point
+                continue;
             }
 
             if (uom == "Celsius" && double.TryParse(value, out double temperature))
             {
                 pointsQueue.Enqueue(PointData
-                    .Measurement("devicedata")
+                    .Measurement("TestData")
                     .Tag("deviceId", deviceId)
                     .Field("temperature", temperature)
                     .Timestamp(timestamp, WritePrecision.Ns));
@@ -75,7 +75,7 @@ public class Program
             else if (uom == "m/s" && double.TryParse(value, out double windSpeed))
             {
                 pointsQueue.Enqueue(PointData
-                    .Measurement("devicedata")
+                    .Measurement("TestData")
                     .Tag("deviceId", deviceId)
                     .Field("wind", windSpeed)
                     .Timestamp(timestamp, WritePrecision.Ns));
