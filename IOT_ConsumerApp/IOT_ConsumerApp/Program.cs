@@ -12,10 +12,10 @@ public class Program
     private static readonly string RabbitMQHost = "localhost";
     private static readonly string RabbitMQQueue = "IOTDeviceDataQueue";
 
-    private static readonly string InfluxDBUrl = "http://devinflux.centralus.cloudapp.azure.com:8086";
+    private static readonly string InfluxDBUrl = "http://localhost:8086";
     private static readonly string InfluxDBToken = "3jaB3TSuGswRsp-t7uP5C_18_1xf60SdcVkGAr-gHxkjCieY8360LfIRSq4hk_HM8enVTbT4j_GdSgDolMwCzw==";
-    private static readonly string InfluxDBOrg = "Aura";
-    private static readonly string InfluxDBBucket = "compdatatest";
+    private static readonly string InfluxDBOrg = "Diya";
+    private static readonly string InfluxDBBucket = "IOTDB";
 
     private static ConcurrentQueue<PointData> pointsQueue = new ConcurrentQueue<PointData>();
     private static int batchSize = 100;
@@ -67,7 +67,7 @@ public class Program
             if (uom == "Celsius" && double.TryParse(value, out double temperature))
             {
                 pointsQueue.Enqueue(PointData
-                    .Measurement("TestData")
+                    .Measurement("devicedata")
                     .Tag("deviceId", deviceId)
                     .Field("temperature", temperature)
                     .Timestamp(timestamp, WritePrecision.Ns));
@@ -75,7 +75,7 @@ public class Program
             else if (uom == "m/s" && double.TryParse(value, out double windSpeed))
             {
                 pointsQueue.Enqueue(PointData
-                    .Measurement("TestData")
+                    .Measurement("devicedata")
                     .Tag("deviceId", deviceId)
                     .Field("wind", windSpeed)
                     .Timestamp(timestamp, WritePrecision.Ns));
