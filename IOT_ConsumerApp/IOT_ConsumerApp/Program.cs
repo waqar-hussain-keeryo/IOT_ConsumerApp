@@ -4,121 +4,137 @@ using InfluxDB.Client.Writes;
 using Newtonsoft.Json;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
-using System.Collections.Concurrent;
 using System.Globalization;
 
 public class Program
 {
-    private static readonly string RabbitMQHost = "localhost";
-    private static readonly string RabbitMQQueue = "IOTDeviceDataQueue";
+    private static readonly string RabbitMQHost = Environment.GetEnvironmentVariable("RABBITMQ_HOST");
+    private static readonly string RabbitMQQueue = Environment.GetEnvironmentVariable("RABBITMQ_QUEUE");
 
-    private static readonly string InfluxDBUrl = "http://localhost:8086";
-    private static readonly string InfluxDBToken = "3jaB3TSuGswRsp-t7uP5C_18_1xf60SdcVkGAr-gHxkjCieY8360LfIRSq4hk_HM8enVTbT4j_GdSgDolMwCzw==";
-    private static readonly string InfluxDBOrg = "Diya";
-    private static readonly string InfluxDBBucket = "IOTDB";
+    private static readonly string InfluxDBUrl = Environment.GetEnvironmentVariable("INFLUXDB_URL");
+    private static readonly string InfluxDBToken = Environment.GetEnvironmentVariable("INFLUXDB_TOKEN");
+    private static readonly string InfluxDBOrg = Environment.GetEnvironmentVariable("INFLUXDB_ORG");
+    private static readonly string InfluxDBBucket = Environment.GetEnvironmentVariable("INFLUXDB_BUCKET");
 
-    private static ConcurrentQueue<PointData> pointsQueue = new ConcurrentQueue<PointData>();
-    private static int batchSize = 100;
-    private static bool isProcessing = false;
+    private static InfluxDBClient _influxDBClient;
 
-    public static void Main(string[] args)
+    public static async Task Main(string[] args)
     {
-        // Set up RabbitMQ connection and channel
-        var factory = new ConnectionFactory() { HostName = RabbitMQHost };
-        using var connection = factory.CreateConnection();
-        using var channel = connection.CreateModel();
-
-        var consumer = new EventingBasicConsumer(channel);
-        consumer.Received += async (model, ea) =>
+        try
         {
-            var body = ea.Body.ToArray();
-            var message = System.Text.Encoding.UTF8.GetString(body);
-            Console.WriteLine("Received message: {0}", message);
+            // Initialize InfluxDB client once for reuse
+            _influxDBClient = InfluxDBClientFactory.Create(InfluxDBUrl, InfluxDBToken.ToCharArray());
 
-            // Send the message to InfluxDB
+            // Set up RabbitMQ connection and channel
+            var factory = new ConnectionFactory() { HostName = RabbitMQHost };
+            using var connection = factory.CreateConnection();
+            using var channel = connection.CreateModel();
+
+            var consumer = new EventingBasicConsumer(channel);
+            consumer.Received += async (model, ea) => await ProcessMessage(channel, ea);
+            channel.BasicConsume(queue: RabbitMQQueue, autoAck: false, consumer: consumer);
+
+            Console.WriteLine("Listening for messages...");
+            Console.WriteLine("Press [enter] to exit.");
+            Console.ReadLine();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"An error occurred during application execution: {ex.Message}");
+        }
+        finally
+        {
+            // Ensure the InfluxDB client is disposed of
+            _influxDBClient?.Dispose();
+        }
+    }
+
+    private static async Task ProcessMessage(IModel channel, BasicDeliverEventArgs ea)
+    {
+        var body = ea.Body.ToArray();
+        var message = System.Text.Encoding.UTF8.GetString(body);
+        Console.WriteLine("Received message: {0}", message);
+
+        try
+        {
             await WriteToInfluxDB(message);
-        };
-
-        channel.BasicConsume(queue: RabbitMQQueue, autoAck: true, consumer: consumer);
-        Console.WriteLine("Press [enter] to exit.");
-        Console.ReadLine();
+            // Acknowledge the message after successful processing
+            channel.BasicAck(deliveryTag: ea.DeliveryTag, multiple: false);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error processing message: {ex.Message}");
+            // Optionally: Handle or log the failure before Nack'ing
+            channel.BasicNack(deliveryTag: ea.DeliveryTag, multiple: false, requeue: true);
+        }
     }
 
     private static async Task WriteToInfluxDB(string message)
     {
-        var influxDBClient = InfluxDBClientFactory.Create(InfluxDBUrl, InfluxDBToken.ToCharArray());
-
         // Deserialize the message into a list of lists of DataPoints
-        var jsonData = JsonConvert.DeserializeObject<List<List<DataPoint>>>(message);
+        List<List<DataPoint>> jsonData;
+        try
+        {
+            jsonData = JsonConvert.DeserializeObject<List<List<DataPoint>>>(message);
+        }
+        catch (JsonException ex)
+        {
+            Console.WriteLine($"Failed to deserialize message: {ex.Message}");
+            return; // Exit the method if deserialization fails
+        }
 
         foreach (var dataPointList in jsonData)
         {
-            string deviceId = dataPointList.FirstOrDefault(dp => dp.Name == "deviceid")?.Value;
-            string value = dataPointList.FirstOrDefault(dp => dp.Name == "value")?.Value;
-            string uom = dataPointList.FirstOrDefault(dp => dp.Name == "uom")?.Value;
-            string scheduledDate = dataPointList.FirstOrDefault(dp => dp.Name == "timestamp")?.Value;
+            var deviceId = GetValueFromDataPoint(dataPointList, "deviceid");
+            var value = GetValueFromDataPoint(dataPointList, "value");
+            var uom = GetValueFromDataPoint(dataPointList, "uom");
+            var scheduledDate = GetValueFromDataPoint(dataPointList, "timestamp");
 
+            // Parse the timestamp
             if (!DateTime.TryParseExact(scheduledDate, "MM-dd-yyyy/HH:mm:tt", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime timestamp))
             {
                 Console.WriteLine($"Invalid scheduled date: {scheduledDate}");
                 continue;
             }
 
-            if (uom == "Celsius" && double.TryParse(value, out double temperature))
+            // Prepare point for InfluxDB based on UOM and write directly to InfluxDB
+            try
             {
-                pointsQueue.Enqueue(PointData
-                    .Measurement("devicedata")
-                    .Tag("deviceId", deviceId)
-                    .Field("temperature", temperature)
-                    .Timestamp(timestamp, WritePrecision.Ns));
-            }
-            else if (uom == "m/s" && double.TryParse(value, out double windSpeed))
-            {
-                pointsQueue.Enqueue(PointData
-                    .Measurement("devicedata")
-                    .Tag("deviceId", deviceId)
-                    .Field("wind", windSpeed)
-                    .Timestamp(timestamp, WritePrecision.Ns));
-            }
-            else
-            {
-                Console.WriteLine("Invalid UOM or value.");
-            }
-        }
+                var writeApi = _influxDBClient.GetWriteApiAsync();
 
-        // Trigger batch write if processing is not already in progress
-        if (!isProcessing)
-        {
-            isProcessing = true;
-            _ = Task.Run(() => FlushPointsToInfluxDB(influxDBClient)); // Fire and forget
+                if (uom == "Celsius" && double.TryParse(value, out double temperature))
+                {
+                    var point = PointData
+                        .Measurement("devicedata")
+                        .Tag("deviceid", deviceId)
+                        .Field("temperature", temperature)
+                        .Timestamp(timestamp, WritePrecision.Ns);
+                    await writeApi.WritePointAsync(point, InfluxDBBucket, InfluxDBOrg);
+                }
+                else if (uom == "m/s" && double.TryParse(value, out double windSpeed))
+                {
+                    var point = PointData
+                        .Measurement("devicedata")
+                        .Tag("deviceid", deviceId)
+                        .Field("wind", windSpeed)
+                        .Timestamp(timestamp, WritePrecision.Ns);
+                    await writeApi.WritePointAsync(point, InfluxDBBucket, InfluxDBOrg);
+                }
+                else
+                {
+                    Console.WriteLine($"Invalid UOM or value. UOM: {uom}, Value: {value}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error writing to InfluxDB: {ex.Message}");
+            }
         }
     }
 
-    private static async Task FlushPointsToInfluxDB(InfluxDBClient influxDBClient)
+    private static string GetValueFromDataPoint(List<DataPoint> dataPointList, string key)
     {
-        while (true)
-        {
-            if (pointsQueue.IsEmpty)
-            {
-                isProcessing = false;
-                return;
-            }
-
-            var writeApi = influxDBClient.GetWriteApiAsync();
-            var batchPoints = new List<PointData>();
-
-            // Collect points for the batch
-            while (pointsQueue.TryDequeue(out var point) && batchPoints.Count < batchSize)
-            {
-                batchPoints.Add(point);
-            }
-
-            if (batchPoints.Count > 0)
-            {
-                await writeApi.WritePointsAsync(batchPoints, InfluxDBBucket, InfluxDBOrg);
-                Console.WriteLine($"Batch write to InfluxDB completed. Total points: {batchPoints.Count}.");
-            }
-        }
+        return dataPointList.FirstOrDefault(dp => dp.Name == key)?.Value;
     }
 
     public class DataPoint

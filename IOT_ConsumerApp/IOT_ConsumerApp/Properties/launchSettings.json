@@ -1,0 +1,15 @@
+{
+  "profiles": {
+    "IOT_ConsumerApp": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "RABBITMQ_HOST": "localhost",
+        "RABBITMQ_QUEUE": "IOTDeviceDataQueue",
+        "INFLUXDB_URL": "http://localhost:8086",
+        "INFLUXDB_TOKEN": "3jaB3TSuGswRsp-t7uP5C_18_1xf60SdcVkGAr-gHxkjCieY8360LfIRSq4hk_HM8enVTbT4j_GdSgDolMwCzw==",
+        "INFLUXDB_ORG": "Diya",
+        "INFLUXDB_BUCKET": "IOTDB"
+      }
+    }
+  }
+}
