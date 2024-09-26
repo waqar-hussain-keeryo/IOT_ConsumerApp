@@ -10,7 +10,6 @@ public class Program
 {
     private static readonly string RabbitMQHost = Environment.GetEnvironmentVariable("RABBITMQ_HOST");
     private static readonly string RabbitMQQueue = Environment.GetEnvironmentVariable("RABBITMQ_QUEUE");
-
     private static readonly string InfluxDBUrl = Environment.GetEnvironmentVariable("INFLUXDB_URL");
     private static readonly string InfluxDBToken = Environment.GetEnvironmentVariable("INFLUXDB_TOKEN");
     private static readonly string InfluxDBOrg = Environment.GetEnvironmentVariable("INFLUXDB_ORG");
@@ -45,7 +44,7 @@ public class Program
         finally
         {
             // Ensure the InfluxDB client is disposed of
-            _influxDBClient?.Dispose();
+            _influxDBClient?.Dispose(); // Changed from DisposeAsync to Dispose
         }
     }
 
@@ -90,6 +89,14 @@ public class Program
             var uom = GetValueFromDataPoint(dataPointList, "uom");
             var scheduledDate = GetValueFromDataPoint(dataPointList, "timestamp");
 
+            // Validate values
+            if (string.IsNullOrWhiteSpace(deviceId) || string.IsNullOrWhiteSpace(value) ||
+                string.IsNullOrWhiteSpace(uom) || string.IsNullOrWhiteSpace(scheduledDate))
+            {
+                Console.WriteLine("One or more required fields are missing. Skipping.");
+                continue;
+            }
+
             // Parse the timestamp
             if (!DateTime.TryParseExact(scheduledDate, "MM-dd-yyyy/HH:mm:tt", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime timestamp))
             {
@@ -102,7 +109,8 @@ public class Program
             {
                 var writeApi = _influxDBClient.GetWriteApiAsync();
 
-                if (uom == "Celsius" && double.TryParse(value, out double temperature))
+                if (uom.Equals("Celsius", StringComparison.OrdinalIgnoreCase) &&
+                    double.TryParse(value, out double temperature))
                 {
                     var point = PointData
                         .Measurement("devicedata")
@@ -111,7 +119,8 @@ public class Program
                         .Timestamp(timestamp, WritePrecision.Ns);
                     await writeApi.WritePointAsync(point, InfluxDBBucket, InfluxDBOrg);
                 }
-                else if (uom == "m/s" && double.TryParse(value, out double windSpeed))
+                else if (uom.Equals("m/s", StringComparison.OrdinalIgnoreCase) &&
+                         double.TryParse(value, out double windSpeed))
                 {
                     var point = PointData
                         .Measurement("devicedata")
@@ -134,7 +143,7 @@ public class Program
 
     private static string GetValueFromDataPoint(List<DataPoint> dataPointList, string key)
     {
-        return dataPointList.FirstOrDefault(dp => dp.Name == key)?.Value;
+        return dataPointList.FirstOrDefault(dp => dp.Name.Equals(key, StringComparison.OrdinalIgnoreCase))?.Value;
     }
 
     public class DataPoint
